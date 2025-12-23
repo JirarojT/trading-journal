@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Save, TrendingUp, TrendingDown, Activity, Brain, AlertCircle, CheckCircle, FileSpreadsheet, Calculator, DollarSign, Edit2, Check, Cloud, CloudOff, Loader2, Calendar, Filter, X } from 'lucide-react';
+import { Plus, Trash2, Save, TrendingUp, TrendingDown, Activity, Brain, AlertCircle, CheckCircle, FileSpreadsheet, Calculator, DollarSign, Edit2, Check, Cloud, CloudOff, Loader2, Calendar, Filter, X, Target, Crosshair } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, setDoc, getDoc } from 'firebase/firestore';
@@ -45,8 +45,23 @@ const TradingJournal = () => {
   const [showForm, setShowForm] = useState(false);
   const [showStats, setShowStats] = useState(false);
   
-  // --- History Filter State (MT5 Style) ---
-  const [filterType, setFilterType] = useState('all'); // today, week, month, year, custom, all
+  // --- MM Calculator State (Points Based) ---
+  const [showMM, setShowMM] = useState(false);
+  const [mmData, setMmData] = useState({
+    balance: 1000,
+    riskPercent: 1, 
+    slPoints: 500, // Default 500 points
+    tpPoints: 1000 // Default 1000 points
+  });
+  const [mmResults, setMmResults] = useState({
+    riskAmount: 0,
+    positionSize: 0,
+    rr: 0,
+    profitAmount: 0
+  });
+
+  // --- History Filter State ---
+  const [filterType, setFilterType] = useState('all'); 
   const [customStartDate, setCustomStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [customEndDate, setCustomEndDate] = useState(new Date().toISOString().split('T')[0]);
 
@@ -99,7 +114,7 @@ const TradingJournal = () => {
     return () => unsubscribe();
   }, [isCloudEnabled]);
 
-  // --- 2. Data Sync (Real-time) ---
+  // --- 2. Data Sync ---
   useEffect(() => {
     if (!user || !isCloudEnabled) return;
 
@@ -134,6 +149,56 @@ const TradingJournal = () => {
     };
   }, [user, isCloudEnabled]);
 
+  // --- MM Calculator Logic (Points Based - Real Time) ---
+  useEffect(() => {
+    const bal = parseFloat(mmData.balance) || 0;
+    const risk = parseFloat(mmData.riskPercent) || 0;
+    const slPts = parseFloat(mmData.slPoints) || 0;
+    const tpPts = parseFloat(mmData.tpPoints) || 0;
+
+    if (slPts > 0) {
+        const riskAmt = (bal * risk) / 100;
+        
+        // Formula: Lot = Risk ($) / SL (Points)
+        // (Assuming Standard Lot where 1 Point = $1 per 1.0 Lot, e.g., Gold/Forex Standard)
+        const size = riskAmt / slPts;
+        
+        let rrRatio = 0;
+        let profitAmt = 0;
+
+        if (tpPts > 0) {
+            rrRatio = tpPts / slPts;
+            profitAmt = size * tpPts; // Profit = Lot * Points
+        }
+
+        setMmResults({
+            riskAmount: riskAmt,
+            positionSize: size,
+            rr: rrRatio,
+            profitAmount: profitAmt
+        });
+    } else {
+        setMmResults({ riskAmount: 0, positionSize: 0, rr: 0, profitAmount: 0 });
+    }
+  }, [mmData]); // Updates automatically whenever inputs change
+
+  const openMMCalculator = () => {
+    const totalPnL = entries.reduce((acc, curr) => acc + parseFloat(curr.calculatedPnL || 0), 0);
+    const currentBal = initialBalance + totalPnL;
+    setMmData(prev => ({ ...prev, balance: currentBal }));
+    setShowMM(true);
+  };
+
+  const applySizeToForm = () => {
+      setFormData(prev => ({
+          ...prev,
+          positionSize: parseFloat(mmResults.positionSize.toFixed(2)) // 2 decimals for Lots
+      }));
+      setShowMM(false);
+      setShowForm(true);
+  };
+
+
   // --- Filter Logic ---
   const getFilteredEntries = () => {
     const now = new Date();
@@ -141,13 +206,13 @@ const TradingJournal = () => {
     
     return entries.filter(entry => {
       const entryDate = new Date(entry.date);
-      const entryDateStr = entry.date; // YYYY-MM-DD format from input
+      const entryDateStr = entry.date; 
 
       if (filterType === 'all') return true;
       if (filterType === 'today') return entryDateStr === todayStr;
       
       if (filterType === 'week') {
-        const firstDay = new Date(now.setDate(now.getDate() - now.getDay())); // Sunday
+        const firstDay = new Date(now.setDate(now.getDate() - now.getDay())); 
         const lastDay = new Date(now.setDate(now.getDate() - now.getDay() + 6));
         return entryDate >= firstDay && entryDate <= lastDay;
       }
@@ -177,9 +242,7 @@ const TradingJournal = () => {
   const filteredTotal = filteredEntries.length;
   const filteredWinRate = filteredTotal > 0 ? ((filteredWins / filteredTotal) * 100).toFixed(0) : 0;
 
-
   // --- Logic & Handlers ---
-
   useEffect(() => {
     const entry = parseFloat(formData.entryPrice);
     const exit = parseFloat(formData.exitPrice);
@@ -319,11 +382,14 @@ const TradingJournal = () => {
             </div>
         </div>
         <div className="flex gap-2">
-            {/* Stats Button */}
-            <button onClick={() => setShowStats(true)} className="p-2 bg-slate-700 rounded-full hover:bg-slate-600 text-cyan-400 border border-slate-600">
+            {/* MM Calculator Button */}
+            <button onClick={openMMCalculator} className="p-2 bg-slate-700 rounded-full hover:bg-slate-600 text-yellow-400 border border-slate-600" title="MM Calculator">
+                <Calculator size={18}/>
+            </button>
+            <button onClick={() => setShowStats(true)} className="p-2 bg-slate-700 rounded-full hover:bg-slate-600 text-cyan-400 border border-slate-600" title="History">
                 <Calendar size={18}/>
             </button>
-            <button onClick={exportToCSV} className="p-2 bg-slate-700 rounded-full hover:bg-slate-600"><FileSpreadsheet size={18}/></button>
+            <button onClick={exportToCSV} className="p-2 bg-slate-700 rounded-full hover:bg-slate-600" title="Export"><FileSpreadsheet size={18}/></button>
             <button onClick={() => {setShowForm(true); resetForm();}} className="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 rounded-full font-bold flex gap-2 text-sm items-center shadow-lg shadow-cyan-500/20"><Plus size={18}/> จดบันทึก</button>
         </div>
       </header>
@@ -337,7 +403,6 @@ const TradingJournal = () => {
           </div>
         ) : (
           <>
-            {/* Main Balance Card */}
             <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-6 rounded-2xl border border-slate-700 shadow-xl relative overflow-hidden">
                 <div className="absolute top-0 right-0 p-4 opacity-10">
                     <DollarSign size={100} />
@@ -377,7 +442,6 @@ const TradingJournal = () => {
                 </div>
             </div>
 
-            {/* Overall Stats (Lifetime) */}
             <div className="grid grid-cols-3 gap-3">
                 <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 text-center">
                     <span className="text-xs text-slate-400 uppercase">Net PnL</span>
@@ -395,7 +459,6 @@ const TradingJournal = () => {
                 </div>
             </div>
 
-            {/* Trade List (Recent) */}
             <div className="space-y-3">
                 <h3 className="text-slate-400 text-sm font-bold uppercase mt-4">Recent Trades</h3>
                 {entries.length === 0 && (
@@ -408,7 +471,7 @@ const TradingJournal = () => {
                     <div key={entry.id} className="bg-slate-800 p-4 rounded-xl border border-slate-700 hover:border-slate-500 transition-colors flex justify-between items-center group relative">
                         <div>
                             <div className="flex items-center gap-2 mb-1">
-                                <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${entry.direction === 'Long' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>{entry.direction}</span>
+                                <span className={`text-xs font-bold px-1.5 rounded ${entry.direction === 'Long' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>{entry.direction}</span>
                                 <span className="font-bold text-lg">{entry.pair}</span>
                                 <span className="text-xs text-slate-500">{entry.date}</span>
                             </div>
@@ -430,7 +493,84 @@ const TradingJournal = () => {
           </>
         )}
 
-        {/* History / Stats Modal (MT5 Style) */}
+        {/* --- MM Calculator Modal (UPDATED: Points & Real-time) --- */}
+        {showMM && (
+          <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+             <div className="bg-slate-800 w-full max-w-md rounded-2xl border border-slate-600 shadow-2xl overflow-hidden">
+                <div className="p-4 bg-slate-800 border-b border-slate-700 flex justify-between items-center">
+                    <h2 className="font-bold flex items-center gap-2 text-lg text-yellow-400"><Calculator size={24}/> MM Calculator</h2>
+                    <button onClick={() => setShowMM(false)} className="bg-slate-700 p-1 rounded-full text-slate-400 hover:text-white"><X size={20}/></button>
+                </div>
+                
+                <div className="p-5 space-y-4">
+                   {/* Inputs */}
+                   <div className="grid grid-cols-2 gap-4">
+                      <div className="col-span-2">
+                        <label className="text-xs text-slate-400 block mb-1">Account Balance ($)</label>
+                        <input type="number" value={mmData.balance} onChange={e => setMmData({...mmData, balance: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white font-mono" />
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-400 block mb-1">Risk (%)</label>
+                        <input type="number" value={mmData.riskPercent} onChange={e => setMmData({...mmData, riskPercent: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white font-mono" />
+                      </div>
+                      <div>
+                         <label className="text-xs text-slate-400 block mb-1">Risk Amount ($)</label>
+                         <div className="w-full bg-slate-700/50 border border-slate-600 rounded p-2 text-red-400 font-mono font-bold">
+                            -${mmResults.riskAmount.toFixed(2)}
+                         </div>
+                      </div>
+                   </div>
+
+                   <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-700/50">
+                      <div>
+                        <label className="text-xs text-slate-400 block mb-1">SL Distance (Points)</label>
+                        <input 
+                            type="number" 
+                            value={mmData.slPoints} 
+                            onChange={e => setMmData({...mmData, slPoints: e.target.value})} 
+                            className="w-full bg-slate-900 border border-red-900/50 rounded p-2 text-white font-mono text-lg focus:border-red-500" 
+                            placeholder="e.g. 500" 
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-400 block mb-1">TP Distance (Points)</label>
+                        <input 
+                            type="number" 
+                            value={mmData.tpPoints} 
+                            onChange={e => setMmData({...mmData, tpPoints: e.target.value})} 
+                            className="w-full bg-slate-900 border border-green-900/50 rounded p-2 text-white font-mono text-lg focus:border-green-500" 
+                            placeholder="Optional" 
+                        />
+                      </div>
+                   </div>
+
+                   {/* Results Box */}
+                   <div className="bg-slate-900/80 rounded-xl p-4 border border-slate-700 mt-4 space-y-3">
+                      <div className="flex justify-between items-center">
+                         <span className="text-sm text-slate-400">Position Size (Lot):</span>
+                         <span className="text-3xl font-bold text-yellow-400 font-mono">{mmResults.positionSize > 0 ? mmResults.positionSize.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '0.00'}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs text-slate-500">
+                         <span>Risk: {mmData.slPoints} pts</span>
+                         {mmResults.rr > 0 && <span className="text-green-400 font-bold">RR Ratio: 1 : {mmResults.rr.toFixed(2)}</span>}
+                      </div>
+                      {mmResults.profitAmount > 0 && (
+                        <div className="pt-2 border-t border-slate-800 flex justify-between items-center">
+                            <span className="text-xs text-slate-400">Potential Profit:</span>
+                            <span className="text-lg font-bold text-green-400 font-mono">+${mmResults.profitAmount.toFixed(2)}</span>
+                        </div>
+                      )}
+                   </div>
+
+                   <button onClick={applySizeToForm} className="w-full py-3 bg-yellow-600 hover:bg-yellow-700 text-black font-bold rounded-lg shadow-lg flex items-center justify-center gap-2">
+                      <Target size={18}/> ใช้ค่านี้เปิดออเดอร์
+                   </button>
+                </div>
+             </div>
+          </div>
+        )}
+
+        {/* History / Stats Modal */}
         {showStats && (
         <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-slate-800 w-full max-w-lg rounded-2xl border border-slate-600 shadow-2xl overflow-hidden max-h-[90vh] flex flex-col h-[80vh]">
@@ -536,7 +676,7 @@ const TradingJournal = () => {
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-slate-800 w-full max-w-lg rounded-2xl border border-slate-600 shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto">
                 <div className="p-4 bg-slate-800 border-b border-slate-700 sticky top-0 flex justify-between items-center z-10">
-                    <h2 className="font-bold flex items-center gap-2"><Calculator className="text-cyan-400"/> คำนวณและบันทึก</h2>
+                    <h2 className="font-bold flex items-center gap-2"><Crosshair className="text-cyan-400"/> คำนวณและบันทึก</h2>
                     <button onClick={() => setShowForm(false)} className="text-slate-400 hover:text-white">✕</button>
                 </div>
                 
@@ -557,7 +697,10 @@ const TradingJournal = () => {
                     </div>
 
                     <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700 space-y-3">
-                        <label className="text-xs font-bold text-cyan-300 uppercase flex items-center gap-1"><DollarSign size={14}/> Trade Math</label>
+                        <div className="flex justify-between items-center">
+                            <label className="text-xs font-bold text-cyan-300 uppercase flex items-center gap-1"><DollarSign size={14}/> Trade Math</label>
+                            <button type="button" onClick={openMMCalculator} className="text-[10px] text-yellow-400 hover:text-yellow-300 flex items-center gap-1"><Calculator size={10}/> คำนวณ MM</button>
+                        </div>
                         <div className="grid grid-cols-3 gap-2">
                             <div>
                                 <label className="text-[10px] text-slate-400 block">Entry Price</label>
