@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Save, TrendingUp, TrendingDown, Activity, Brain, AlertCircle, CheckCircle, FileSpreadsheet, Calculator, DollarSign, Edit2, Check, Cloud, CloudOff, Loader2 } from 'lucide-react';
+import { Plus, Trash2, Save, TrendingUp, TrendingDown, Activity, Brain, AlertCircle, CheckCircle, FileSpreadsheet, Calculator, DollarSign, Edit2, Check, Cloud, CloudOff, Loader2, Calendar, Filter, X } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, setDoc, getDoc } from 'firebase/firestore';
@@ -28,13 +28,10 @@ try {
 }
 
 const appId = 'my-trading-journal-app'; 
-
-// ✅ KEY FIX: ใช้ ID กลางอันเดียว เพื่อให้ทุกเครื่องเจอกัน
-// (ไม่ว่าจะเปิดจากเครื่องไหน ก็จะเก็บข้อมูลลงกล่องชื่อ 'main_portfolio' เสมอ)
 const SHARED_USER_ID = 'main_portfolio_v1';
 
 const TradingJournal = () => {
-  const [user, setUser] = useState(null); // ใช้เช็คแค่ว่าต่อเน็ตติดไหม
+  const [user, setUser] = useState(null);
   const [isCloudEnabled, setIsCloudEnabled] = useState(!!firebaseConfig);
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -44,8 +41,15 @@ const TradingJournal = () => {
   const [isEditingBalance, setIsEditingBalance] = useState(false);
   const [tempBalance, setTempBalance] = useState(initialBalance);
 
-  // Form State
+  // Form & UI State
   const [showForm, setShowForm] = useState(false);
+  const [showStats, setShowStats] = useState(false);
+  
+  // --- History Filter State (MT5 Style) ---
+  const [filterType, setFilterType] = useState('all'); // today, week, month, year, custom, all
+  const [customStartDate, setCustomStartDate] = useState(new Date().toISOString().split('T')[0]);
+  const [customEndDate, setCustomEndDate] = useState(new Date().toISOString().split('T')[0]);
+
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
     pair: '',
@@ -89,7 +93,6 @@ const TradingJournal = () => {
     initAuth();
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      // แม้จะได้ User ID ต่างกัน แต่เราจะใช้ SHARED_USER_ID แทนในการดึงข้อมูล
       setUser(currentUser);
       if (!currentUser) setLoading(false);
     });
@@ -100,8 +103,6 @@ const TradingJournal = () => {
   useEffect(() => {
     if (!user || !isCloudEnabled) return;
 
-    // 2.1 Sync Journal Entries
-    // ใช้ SHARED_USER_ID แทน user.uid
     const q = query(
       collection(db, 'artifacts', appId, 'users', SHARED_USER_ID, 'journal_entries'),
       orderBy('createdAt', 'desc')
@@ -119,8 +120,6 @@ const TradingJournal = () => {
       setLoading(false);
     });
 
-    // 2.2 Sync Balance (Single Document)
-    // ใช้ SHARED_USER_ID แทน user.uid
     const balanceDocRef = doc(db, 'artifacts', appId, 'users', SHARED_USER_ID, 'settings', 'balance');
     const unsubscribeBalance = onSnapshot(balanceDocRef, (docSnap) => {
       if (docSnap.exists()) {
@@ -134,6 +133,50 @@ const TradingJournal = () => {
       unsubscribeBalance();
     };
   }, [user, isCloudEnabled]);
+
+  // --- Filter Logic ---
+  const getFilteredEntries = () => {
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    
+    return entries.filter(entry => {
+      const entryDate = new Date(entry.date);
+      const entryDateStr = entry.date; // YYYY-MM-DD format from input
+
+      if (filterType === 'all') return true;
+      if (filterType === 'today') return entryDateStr === todayStr;
+      
+      if (filterType === 'week') {
+        const firstDay = new Date(now.setDate(now.getDate() - now.getDay())); // Sunday
+        const lastDay = new Date(now.setDate(now.getDate() - now.getDay() + 6));
+        return entryDate >= firstDay && entryDate <= lastDay;
+      }
+
+      if (filterType === 'month') {
+        const currentMonth = new Date().getMonth();
+        const currentYear = new Date().getFullYear();
+        return entryDate.getMonth() === currentMonth && entryDate.getFullYear() === currentYear;
+      }
+
+      if (filterType === 'year') {
+        const currentYear = new Date().getFullYear();
+        return entryDate.getFullYear() === currentYear;
+      }
+
+      if (filterType === 'custom') {
+        return entryDateStr >= customStartDate && entryDateStr <= customEndDate;
+      }
+
+      return true;
+    });
+  };
+
+  const filteredEntries = getFilteredEntries();
+  const filteredPnL = filteredEntries.reduce((acc, curr) => acc + parseFloat(curr.calculatedPnL || 0), 0);
+  const filteredWins = filteredEntries.filter(e => e.result === 'Win').length;
+  const filteredTotal = filteredEntries.length;
+  const filteredWinRate = filteredTotal > 0 ? ((filteredWins / filteredTotal) * 100).toFixed(0) : 0;
+
 
   // --- Logic & Handlers ---
 
@@ -179,7 +222,6 @@ const TradingJournal = () => {
 
     try {
       if (isCloudEnabled && user) {
-        // บันทึกไปที่ SHARED_USER_ID
         await addDoc(collection(db, 'artifacts', appId, 'users', SHARED_USER_ID, 'journal_entries'), newEntry);
       } else {
         const localEntry = { ...newEntry, id: Date.now().toString(), createdAt: new Date().toISOString() };
@@ -198,7 +240,6 @@ const TradingJournal = () => {
     if(!confirm('ลบรายการนี้?')) return;
 
     if (isCloudEnabled && user) {
-      // ลบจาก SHARED_USER_ID
       await deleteDoc(doc(db, 'artifacts', appId, 'users', SHARED_USER_ID, 'journal_entries', id));
     } else {
       const updatedEntries = entries.filter(e => e.id !== id);
@@ -213,7 +254,6 @@ const TradingJournal = () => {
     setIsEditingBalance(false);
 
     if (isCloudEnabled && user) {
-       // บันทึกไปที่ SHARED_USER_ID
        await setDoc(doc(db, 'artifacts', appId, 'users', SHARED_USER_ID, 'settings', 'balance'), {
          amount: newAmount
        });
@@ -255,8 +295,8 @@ const TradingJournal = () => {
 
   const totalPnL = entries.reduce((acc, curr) => acc + parseFloat(curr.calculatedPnL || 0), 0);
   const currentBalance = initialBalance + totalPnL;
-  const winRate = entries.length > 0 ? ((entries.filter(e => e.result === 'Win').length / entries.length) * 100).toFixed(0) : 0;
   const growth = initialBalance > 0 ? ((currentBalance - initialBalance) / initialBalance) * 100 : 0;
+  const winRate = entries.length > 0 ? ((entries.filter(e => e.result === 'Win').length / entries.length) * 100).toFixed(0) : 0;
 
   const emotions = [
     { value: 'Calm', label: '😌 สงบนิ่ง (Calm)', color: 'bg-blue-100 text-blue-800' },
@@ -279,6 +319,10 @@ const TradingJournal = () => {
             </div>
         </div>
         <div className="flex gap-2">
+            {/* Stats Button */}
+            <button onClick={() => setShowStats(true)} className="p-2 bg-slate-700 rounded-full hover:bg-slate-600 text-cyan-400 border border-slate-600">
+                <Calendar size={18}/>
+            </button>
             <button onClick={exportToCSV} className="p-2 bg-slate-700 rounded-full hover:bg-slate-600"><FileSpreadsheet size={18}/></button>
             <button onClick={() => {setShowForm(true); resetForm();}} className="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 rounded-full font-bold flex gap-2 text-sm items-center shadow-lg shadow-cyan-500/20"><Plus size={18}/> จดบันทึก</button>
         </div>
@@ -293,6 +337,7 @@ const TradingJournal = () => {
           </div>
         ) : (
           <>
+            {/* Main Balance Card */}
             <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-6 rounded-2xl border border-slate-700 shadow-xl relative overflow-hidden">
                 <div className="absolute top-0 right-0 p-4 opacity-10">
                     <DollarSign size={100} />
@@ -332,6 +377,7 @@ const TradingJournal = () => {
                 </div>
             </div>
 
+            {/* Overall Stats (Lifetime) */}
             <div className="grid grid-cols-3 gap-3">
                 <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 text-center">
                     <span className="text-xs text-slate-400 uppercase">Net PnL</span>
@@ -349,14 +395,16 @@ const TradingJournal = () => {
                 </div>
             </div>
 
+            {/* Trade List (Recent) */}
             <div className="space-y-3">
+                <h3 className="text-slate-400 text-sm font-bold uppercase mt-4">Recent Trades</h3>
                 {entries.length === 0 && (
                   <div className="text-center py-10 text-slate-500 border border-dashed border-slate-700 rounded-xl">
-                    <p>ยังไม่มีรายการเทรด (Cloud Mode)</p>
-                    <p className="text-xs mt-2">กดปุ่ม + จดบันทึก เพื่อเริ่มเทรดแรกของคุณ</p>
+                    <p>ยังไม่มีรายการเทรด</p>
+                    <p className="text-xs mt-2">กดปุ่ม + เพื่อเริ่มจดบันทึก</p>
                   </div>
                 )}
-                {entries.map(entry => (
+                {entries.slice(0, 5).map(entry => (
                     <div key={entry.id} className="bg-slate-800 p-4 rounded-xl border border-slate-700 hover:border-slate-500 transition-colors flex justify-between items-center group relative">
                         <div>
                             <div className="flex items-center gap-2 mb-1">
@@ -365,22 +413,125 @@ const TradingJournal = () => {
                                 <span className="text-xs text-slate-500">{entry.date}</span>
                             </div>
                             <div className="text-sm text-slate-400 font-mono">
-                                <span className="text-slate-500">In:</span> {entry.entryPrice} <span className="text-slate-500">→ Out:</span> {entry.exitPrice || '-'} <span className="text-slate-500">({entry.positionSize} Lot)</span>
+                                {entry.entryPrice} → {entry.exitPrice || '?'} ({entry.positionSize})
                             </div>
                         </div>
                         <div className="text-right">
                             <div className={`text-xl font-bold font-mono ${parseFloat(entry.calculatedPnL) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                                 {parseFloat(entry.calculatedPnL) > 0 ? '+' : ''}{entry.calculatedPnL}
                             </div>
-                            <div className="text-xs text-slate-500 mt-1">{entry.emotionPre}</div>
+                            <div className="text-xs text-slate-500 mt-1">{entry.result}</div>
                         </div>
                         <button onClick={() => deleteEntry(entry.id)} className="absolute top-4 right-4 text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={16}/></button>
                     </div>
                 ))}
+                {entries.length > 5 && <p className="text-center text-xs text-slate-500 cursor-pointer hover:text-cyan-400" onClick={() => setShowStats(true)}>ดูทั้งหมดใน History</p>}
             </div>
           </>
         )}
 
+        {/* History / Stats Modal (MT5 Style) */}
+        {showStats && (
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-slate-800 w-full max-w-lg rounded-2xl border border-slate-600 shadow-2xl overflow-hidden max-h-[90vh] flex flex-col h-[80vh]">
+                
+                {/* Modal Header */}
+                <div className="p-4 bg-slate-800 border-b border-slate-700 flex justify-between items-center shrink-0">
+                    <h2 className="font-bold flex items-center gap-2 text-lg"><Calendar className="text-cyan-400"/> History</h2>
+                    <button onClick={() => setShowStats(false)} className="bg-slate-700 p-1 rounded-full text-slate-400 hover:text-white"><X size={20}/></button>
+                </div>
+                
+                {/* Filter Tabs */}
+                <div className="p-3 bg-slate-800 border-b border-slate-700 shrink-0">
+                    <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+                        {['today', 'week', 'month', 'year', 'all', 'custom'].map((ft) => (
+                            <button 
+                                key={ft}
+                                onClick={() => setFilterType(ft)}
+                                className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${filterType === ft ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-500/30' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}
+                            >
+                                {ft === 'today' ? 'วันนี้' : ft === 'week' ? 'สัปดาห์นี้' : ft === 'month' ? 'เดือนนี้' : ft === 'year' ? 'ปีนี้' : ft === 'custom' ? 'เลือกวัน' : 'ทั้งหมด'}
+                            </button>
+                        ))}
+                    </div>
+
+                    {/* Custom Date Inputs */}
+                    {filterType === 'custom' && (
+                        <div className="flex items-center gap-2 mt-3 bg-slate-900/50 p-2 rounded-lg border border-slate-700">
+                            <input 
+                                type="date" 
+                                value={customStartDate} 
+                                onChange={(e) => setCustomStartDate(e.target.value)}
+                                className="bg-slate-800 text-white text-sm px-2 py-1 rounded border border-slate-600 outline-none w-full"
+                            />
+                            <span className="text-slate-500">-</span>
+                            <input 
+                                type="date" 
+                                value={customEndDate} 
+                                onChange={(e) => setCustomEndDate(e.target.value)}
+                                className="bg-slate-800 text-white text-sm px-2 py-1 rounded border border-slate-600 outline-none w-full"
+                            />
+                        </div>
+                    )}
+                </div>
+
+                {/* Summary Bar for Selected Period */}
+                <div className="bg-slate-700/30 p-4 shrink-0 flex justify-between items-center border-b border-slate-700">
+                    <div>
+                        <p className="text-xs text-slate-400 uppercase">Profit</p>
+                        <p className={`text-xl font-bold ${filteredPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {filteredPnL > 0 ? '+' : ''}{filteredPnL.toFixed(2)}
+                        </p>
+                    </div>
+                    <div className="text-right">
+                        <p className="text-xs text-slate-400 uppercase">Trades / Win Rate</p>
+                        <p className="text-sm font-bold text-slate-200">
+                            {filteredTotal} Orders <span className="text-slate-500">|</span> <span className="text-cyan-400">{filteredWinRate}%</span>
+                        </p>
+                    </div>
+                </div>
+
+                {/* Scrollable Order List */}
+                <div className="overflow-y-auto flex-1 p-0 bg-slate-900/50">
+                    {filteredEntries.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-full text-slate-500">
+                            <Filter size={40} className="mb-2 opacity-20"/>
+                            <p>ไม่มีรายการในช่วงเวลานี้</p>
+                        </div>
+                    ) : (
+                        filteredEntries.map((entry) => (
+                            <div key={entry.id} className="p-4 border-b border-slate-700/50 hover:bg-slate-800/50 transition-colors flex justify-between items-center">
+                                <div>
+                                    <div className="flex items-center gap-2">
+                                        <span className={`text-[10px] font-bold px-1.5 rounded ${entry.direction === 'Long' ? 'bg-green-900 text-green-400' : 'bg-red-900 text-red-400'}`}>
+                                            {entry.direction.toUpperCase()}
+                                        </span>
+                                        <span className="font-bold text-slate-200">{entry.pair}</span>
+                                    </div>
+                                    <div className="text-xs text-slate-500 mt-1">
+                                        {entry.date} <span className="mx-1">•</span> {entry.positionSize} Lot
+                                    </div>
+                                    <div className="text-xs text-slate-400 mt-0.5">
+                                        {entry.entryPrice} → {entry.exitPrice || '...'}
+                                    </div>
+                                </div>
+                                <div className="text-right">
+                                    <div className={`font-bold font-mono ${parseFloat(entry.calculatedPnL) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                        {parseFloat(entry.calculatedPnL) > 0 ? '+' : ''}{entry.calculatedPnL}
+                                    </div>
+                                    <div className="text-[10px] text-slate-500 mt-1 bg-slate-800 px-2 py-0.5 rounded-full inline-block border border-slate-700">
+                                        {entry.emotionPre}
+                                    </div>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
+            </div>
+        </div>
+        )}
+
+        {/* Input Form Modal */}
         {showForm && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-slate-800 w-full max-w-lg rounded-2xl border border-slate-600 shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto">
@@ -431,6 +582,10 @@ const TradingJournal = () => {
                     </div>
 
                     <div className="space-y-3">
+                        <div>
+                            <label className="text-xs text-slate-400 block mb-1">Date</label>
+                            <input type="date" name="date" value={formData.date} onChange={handleInputChange} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white outline-none" />
+                        </div>
                         <div>
                             <label className="text-xs text-slate-400 block mb-1">Emotion (Pre-trade)</label>
                             <select name="emotionPre" value={formData.emotionPre} onChange={handleInputChange} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white outline-none">
