@@ -375,7 +375,7 @@ const TradingJournal = () => {
         <div className="flex items-center gap-2">
             <Brain className="text-cyan-400" />
             <div className="flex flex-col">
-              <h1 className="font-bold text-lg bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent leading-none">Pro Journal</h1>
+              <h1 className="font-bold text-lg bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent leading-none">Journal</h1>
               <span className="text-[10px] text-slate-500 flex items-center gap-1">
                 {isCloudEnabled ? <><Cloud size={10} className="text-green-500"/> Cloud Sync</> : <><CloudOff size={10} className="text-orange-500"/> Local Storage</>}
               </span>
