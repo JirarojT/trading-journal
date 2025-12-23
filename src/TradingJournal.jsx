@@ -5,8 +5,6 @@ import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken }
 import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, setDoc, getDoc } from 'firebase/firestore';
 
 // --- Firebase Configuration ---
-// หมายเหตุ: โค้ดส่วนนี้จะใช้ Config ของระบบ Preview โดยอัตโนมัติ
-// หากนำไปใช้เอง ให้แทนที่ด้วย Firebase Config ของคุณ
 const firebaseConfig = {
   apiKey: "AIzaSyAF_mS9VByDBtJWwEy6Ok4vThGMykArWiI",
   authDomain: "my-trading-journal-5c8fd.firebaseapp.com",
@@ -17,13 +15,20 @@ const firebaseConfig = {
   measurementId: "G-GYZRY0CDG7"
 };
 
-// Initialize Firebase (Only if config exists, otherwise fallback to local for safety)
+// Initialize Firebase
 let db, auth;
-if (firebaseConfig) {
-  const app = initializeApp(firebaseConfig);
-  auth = getAuth(app);
-  db = getFirestore(app);
+try {
+  if (firebaseConfig) {
+    const app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    db = getFirestore(app);
+  }
+} catch (error) {
+  console.error("Firebase Init Error:", error);
 }
+
+// ✅ แก้ไข: เพิ่มบรรทัดนี้กลับเข้ามา (ไม่งั้นจอขาว)
+const appId = 'my-trading-journal-app'; 
 
 const TradingJournal = () => {
   const [user, setUser] = useState(null);
@@ -58,7 +63,6 @@ const TradingJournal = () => {
   // --- 1. Authentication & Setup ---
   useEffect(() => {
     if (!isCloudEnabled) {
-      // Fallback to LocalStorage if no Firebase
       const saved = localStorage.getItem('trading_mindfulness_journal');
       if (saved) setEntries(JSON.parse(saved));
       const savedBal = localStorage.getItem('trading_journal_balance');
@@ -68,10 +72,15 @@ const TradingJournal = () => {
     }
 
     const initAuth = async () => {
-      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-        await signInWithCustomToken(auth, __initial_auth_token);
-      } else {
-        await signInAnonymously(auth);
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (error) {
+        console.error("Auth Error:", error);
+        setLoading(false);
       }
     };
     initAuth();
@@ -163,19 +172,20 @@ const TradingJournal = () => {
       createdAt: serverTimestamp() // Use server time for sorting
     };
 
-    if (isCloudEnabled && user) {
-      // Save to Firebase
-      await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'journal_entries'), newEntry);
-    } else {
-      // Save to LocalStorage
-      const localEntry = { ...newEntry, id: Date.now().toString(), createdAt: new Date().toISOString() };
-      const updatedEntries = [localEntry, ...entries];
-      setEntries(updatedEntries);
-      localStorage.setItem('trading_mindfulness_journal', JSON.stringify(updatedEntries));
+    try {
+      if (isCloudEnabled && user) {
+        await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'journal_entries'), newEntry);
+      } else {
+        const localEntry = { ...newEntry, id: Date.now().toString(), createdAt: new Date().toISOString() };
+        const updatedEntries = [localEntry, ...entries];
+        setEntries(updatedEntries);
+        localStorage.setItem('trading_mindfulness_journal', JSON.stringify(updatedEntries));
+      }
+      setShowForm(false);
+      resetForm();
+    } catch (error) {
+      alert("บันทึกข้อมูลไม่สำเร็จ: " + error.message);
     }
-
-    setShowForm(false);
-    resetForm();
   };
 
   const deleteEntry = async (id) => {
@@ -271,7 +281,11 @@ const TradingJournal = () => {
       <main className="max-w-3xl mx-auto p-4 space-y-6">
         
         {loading ? (
-          <div className="flex justify-center py-10"><Loader2 className="animate-spin text-cyan-500" size={40}/></div>
+          <div className="flex flex-col items-center justify-center py-20 text-slate-500 gap-4">
+             <Loader2 className="animate-spin text-cyan-500" size={40}/>
+             <p>กำลังเชื่อมต่อกับ Firebase...</p>
+             <p className="text-xs text-slate-600">ถ้าค้างหน้านี้นานเกิน 10 วินาที ให้เช็คว่าเปิด Anonymous Auth ใน Firebase หรือยัง</p>
+          </div>
         ) : (
           <>
             {/* Main Balance Card */}
