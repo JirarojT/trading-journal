@@ -27,11 +27,14 @@ try {
   console.error("Firebase Init Error:", error);
 }
 
-// ✅ แก้ไข: เพิ่มบรรทัดนี้กลับเข้ามา (ไม่งั้นจอขาว)
 const appId = 'my-trading-journal-app'; 
 
+// ✅ KEY FIX: ใช้ ID กลางอันเดียว เพื่อให้ทุกเครื่องเจอกัน
+// (ไม่ว่าจะเปิดจากเครื่องไหน ก็จะเก็บข้อมูลลงกล่องชื่อ 'main_portfolio' เสมอ)
+const SHARED_USER_ID = 'main_portfolio_v1';
+
 const TradingJournal = () => {
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(null); // ใช้เช็คแค่ว่าต่อเน็ตติดไหม
   const [isCloudEnabled, setIsCloudEnabled] = useState(!!firebaseConfig);
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -86,6 +89,7 @@ const TradingJournal = () => {
     initAuth();
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      // แม้จะได้ User ID ต่างกัน แต่เราจะใช้ SHARED_USER_ID แทนในการดึงข้อมูล
       setUser(currentUser);
       if (!currentUser) setLoading(false);
     });
@@ -97,8 +101,9 @@ const TradingJournal = () => {
     if (!user || !isCloudEnabled) return;
 
     // 2.1 Sync Journal Entries
+    // ใช้ SHARED_USER_ID แทน user.uid
     const q = query(
-      collection(db, 'artifacts', appId, 'users', user.uid, 'journal_entries'),
+      collection(db, 'artifacts', appId, 'users', SHARED_USER_ID, 'journal_entries'),
       orderBy('createdAt', 'desc')
     );
 
@@ -115,7 +120,8 @@ const TradingJournal = () => {
     });
 
     // 2.2 Sync Balance (Single Document)
-    const balanceDocRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'balance');
+    // ใช้ SHARED_USER_ID แทน user.uid
+    const balanceDocRef = doc(db, 'artifacts', appId, 'users', SHARED_USER_ID, 'settings', 'balance');
     const unsubscribeBalance = onSnapshot(balanceDocRef, (docSnap) => {
       if (docSnap.exists()) {
         setInitialBalance(docSnap.data().amount);
@@ -131,7 +137,6 @@ const TradingJournal = () => {
 
   // --- Logic & Handlers ---
 
-  // Auto Calculate PnL in Form
   useEffect(() => {
     const entry = parseFloat(formData.entryPrice);
     const exit = parseFloat(formData.exitPrice);
@@ -169,12 +174,13 @@ const TradingJournal = () => {
     const newEntry = {
       ...formData,
       result: finalResult,
-      createdAt: serverTimestamp() // Use server time for sorting
+      createdAt: serverTimestamp()
     };
 
     try {
       if (isCloudEnabled && user) {
-        await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'journal_entries'), newEntry);
+        // บันทึกไปที่ SHARED_USER_ID
+        await addDoc(collection(db, 'artifacts', appId, 'users', SHARED_USER_ID, 'journal_entries'), newEntry);
       } else {
         const localEntry = { ...newEntry, id: Date.now().toString(), createdAt: new Date().toISOString() };
         const updatedEntries = [localEntry, ...entries];
@@ -192,7 +198,8 @@ const TradingJournal = () => {
     if(!confirm('ลบรายการนี้?')) return;
 
     if (isCloudEnabled && user) {
-      await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'journal_entries', id));
+      // ลบจาก SHARED_USER_ID
+      await deleteDoc(doc(db, 'artifacts', appId, 'users', SHARED_USER_ID, 'journal_entries', id));
     } else {
       const updatedEntries = entries.filter(e => e.id !== id);
       setEntries(updatedEntries);
@@ -206,7 +213,8 @@ const TradingJournal = () => {
     setIsEditingBalance(false);
 
     if (isCloudEnabled && user) {
-       await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'balance'), {
+       // บันทึกไปที่ SHARED_USER_ID
+       await setDoc(doc(db, 'artifacts', appId, 'users', SHARED_USER_ID, 'settings', 'balance'), {
          amount: newAmount
        });
     } else {
@@ -245,7 +253,6 @@ const TradingJournal = () => {
     link.click();
   };
 
-  // Stats Calculations
   const totalPnL = entries.reduce((acc, curr) => acc + parseFloat(curr.calculatedPnL || 0), 0);
   const currentBalance = initialBalance + totalPnL;
   const winRate = entries.length > 0 ? ((entries.filter(e => e.result === 'Win').length / entries.length) * 100).toFixed(0) : 0;
@@ -261,7 +268,6 @@ const TradingJournal = () => {
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 font-sans pb-20">
-      {/* Header */}
       <header className="bg-slate-800 p-4 sticky top-0 z-10 shadow-lg border-b border-slate-700 flex justify-between items-center">
         <div className="flex items-center gap-2">
             <Brain className="text-cyan-400" />
@@ -284,11 +290,9 @@ const TradingJournal = () => {
           <div className="flex flex-col items-center justify-center py-20 text-slate-500 gap-4">
              <Loader2 className="animate-spin text-cyan-500" size={40}/>
              <p>กำลังเชื่อมต่อกับ Firebase...</p>
-             <p className="text-xs text-slate-600">ถ้าค้างหน้านี้นานเกิน 10 วินาที ให้เช็คว่าเปิด Anonymous Auth ใน Firebase หรือยัง</p>
           </div>
         ) : (
           <>
-            {/* Main Balance Card */}
             <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-6 rounded-2xl border border-slate-700 shadow-xl relative overflow-hidden">
                 <div className="absolute top-0 right-0 p-4 opacity-10">
                     <DollarSign size={100} />
@@ -328,7 +332,6 @@ const TradingJournal = () => {
                 </div>
             </div>
 
-            {/* Dashboard Stats */}
             <div className="grid grid-cols-3 gap-3">
                 <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 text-center">
                     <span className="text-xs text-slate-400 uppercase">Net PnL</span>
@@ -346,7 +349,6 @@ const TradingJournal = () => {
                 </div>
             </div>
 
-            {/* Trade List */}
             <div className="space-y-3">
                 {entries.length === 0 && (
                   <div className="text-center py-10 text-slate-500 border border-dashed border-slate-700 rounded-xl">
@@ -379,7 +381,6 @@ const TradingJournal = () => {
           </>
         )}
 
-        {/* Modal Form */}
         {showForm && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-slate-800 w-full max-w-lg rounded-2xl border border-slate-600 shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto">
@@ -390,7 +391,6 @@ const TradingJournal = () => {
                 
                 <form onSubmit={handleSubmit} className="p-5 space-y-5">
                     
-                    {/* 1. Setup & Direction */}
                     <div className="grid grid-cols-2 gap-3">
                         <div>
                             <label className="text-xs text-slate-400 block mb-1">Asset (Pair)</label>
@@ -405,7 +405,6 @@ const TradingJournal = () => {
                         </div>
                     </div>
 
-                    {/* 2. Calculator Zone */}
                     <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700 space-y-3">
                         <label className="text-xs font-bold text-cyan-300 uppercase flex items-center gap-1"><DollarSign size={14}/> Trade Math</label>
                         <div className="grid grid-cols-3 gap-2">
@@ -423,7 +422,6 @@ const TradingJournal = () => {
                             </div>
                         </div>
                         
-                        {/* Auto PnL Display */}
                         <div className="flex justify-between items-center pt-2 border-t border-slate-700">
                             <span className="text-sm text-slate-400">Estimated PnL:</span>
                             <span className={`text-xl font-mono font-bold ${formData.calculatedPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
@@ -432,7 +430,6 @@ const TradingJournal = () => {
                         </div>
                     </div>
 
-                    {/* 3. Mindfulness & Notes */}
                     <div className="space-y-3">
                         <div>
                             <label className="text-xs text-slate-400 block mb-1">Emotion (Pre-trade)</label>
