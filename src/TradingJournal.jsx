@@ -72,6 +72,7 @@ const TradingJournal = () => {
     entryPrice: '',
     exitPrice: '',
     positionSize: '', 
+    multiplier: 100, // Default to 100 as per user request (was 1)
     calculatedPnL: 0, 
     result: 'Pending',
     entryReason: '',
@@ -160,7 +161,6 @@ const TradingJournal = () => {
         const riskAmt = (bal * risk) / 100;
         
         // Formula: Lot = Risk ($) / SL (Points)
-        // (Assuming Standard Lot where 1 Point = $1 per 1.0 Lot, e.g., Gold/Forex Standard)
         const size = riskAmt / slPts;
         
         let rrRatio = 0;
@@ -180,7 +180,7 @@ const TradingJournal = () => {
     } else {
         setMmResults({ riskAmount: 0, positionSize: 0, rr: 0, profitAmount: 0 });
     }
-  }, [mmData]); // Updates automatically whenever inputs change
+  }, [mmData]); 
 
   const openMMCalculator = () => {
     const totalPnL = entries.reduce((acc, curr) => acc + parseFloat(curr.calculatedPnL || 0), 0);
@@ -192,7 +192,7 @@ const TradingJournal = () => {
   const applySizeToForm = () => {
       setFormData(prev => ({
           ...prev,
-          positionSize: parseFloat(mmResults.positionSize.toFixed(2)) // 2 decimals for Lots
+          positionSize: parseFloat(mmResults.positionSize.toFixed(2)) 
       }));
       setShowMM(false);
       setShowForm(true);
@@ -247,17 +247,18 @@ const TradingJournal = () => {
     const entry = parseFloat(formData.entryPrice);
     const exit = parseFloat(formData.exitPrice);
     const size = parseFloat(formData.positionSize);
+    const multiplier = parseFloat(formData.multiplier) || 1; // Default to 1 if empty
 
     if (!isNaN(entry) && !isNaN(exit) && !isNaN(size)) {
       let pnl = 0;
       if (formData.direction === 'Long') {
-        pnl = (exit - entry) * size;
+        pnl = (exit - entry) * size * multiplier;
       } else {
-        pnl = (entry - exit) * size;
+        pnl = (entry - exit) * size * multiplier;
       }
       setFormData(prev => ({ ...prev, calculatedPnL: pnl.toFixed(2) }));
     }
-  }, [formData.entryPrice, formData.exitPrice, formData.positionSize, formData.direction]);
+  }, [formData.entryPrice, formData.exitPrice, formData.positionSize, formData.direction, formData.multiplier]);
 
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -333,6 +334,7 @@ const TradingJournal = () => {
       entryPrice: '',
       exitPrice: '',
       positionSize: '',
+      multiplier: 100, // Reset to 100
       calculatedPnL: 0,
       result: 'Pending',
       entryReason: '',
@@ -345,9 +347,9 @@ const TradingJournal = () => {
   };
 
   const exportToCSV = () => {
-    const headers = ["Date,Pair,Direction,Entry Price,Exit Price,Size,PnL,Reason,Emotion,Result,Notes"];
+    const headers = ["Date,Pair,Direction,Entry Price,Exit Price,Size,Multiplier,PnL,Reason,Emotion,Result,Notes"];
     const rows = entries.map(e => 
-      `${e.date},${e.pair},${e.direction},${e.entryPrice},${e.exitPrice},${e.positionSize},${e.calculatedPnL},"${e.entryReason}",${e.emotionPre},${e.result},"${e.notes}"`
+      `${e.date},${e.pair},${e.direction},${e.entryPrice},${e.exitPrice},${e.positionSize},${e.multiplier || 1},${e.calculatedPnL},"${e.entryReason}",${e.emotionPre},${e.result},"${e.notes}"`
     );
     const csvContent = "\uFEFF" + [headers, ...rows].join("\n");
     const link = document.createElement("a");
@@ -375,7 +377,7 @@ const TradingJournal = () => {
         <div className="flex items-center gap-2">
             <Brain className="text-cyan-400" />
             <div className="flex flex-col">
-              <h1 className="font-bold text-lg bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent leading-none">Journal</h1>
+              <h1 className="font-bold text-lg bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent leading-none">Pro Journal</h1>
               <span className="text-[10px] text-slate-500 flex items-center gap-1">
                 {isCloudEnabled ? <><Cloud size={10} className="text-green-500"/> Cloud Sync</> : <><CloudOff size={10} className="text-orange-500"/> Local Storage</>}
               </span>
@@ -701,7 +703,7 @@ const TradingJournal = () => {
                             <label className="text-xs font-bold text-cyan-300 uppercase flex items-center gap-1"><DollarSign size={14}/> Trade Math</label>
                             <button type="button" onClick={openMMCalculator} className="text-[10px] text-yellow-400 hover:text-yellow-300 flex items-center gap-1"><Calculator size={10}/> คำนวณ MM</button>
                         </div>
-                        <div className="grid grid-cols-3 gap-2">
+                        <div className="grid grid-cols-2 gap-2">
                             <div>
                                 <label className="text-[10px] text-slate-400 block">Entry Price</label>
                                 <input type="number" name="entryPrice" value={formData.entryPrice} onChange={handleInputChange} placeholder="0.00" className="w-full bg-slate-800 border border-slate-600 rounded p-1.5 text-sm text-white focus:border-cyan-500 outline-none" step="any" required />
@@ -713,6 +715,10 @@ const TradingJournal = () => {
                             <div>
                                 <label className="text-[10px] text-slate-400 block">Lot/Size</label>
                                 <input type="number" name="positionSize" value={formData.positionSize} onChange={handleInputChange} placeholder="1" className="w-full bg-slate-800 border border-slate-600 rounded p-1.5 text-sm text-white focus:border-cyan-500 outline-none" step="any" required />
+                            </div>
+                            <div>
+                                <label className="text-[10px] text-slate-400 block">Multiplier</label>
+                                <input type="number" name="multiplier" value={formData.multiplier} onChange={handleInputChange} placeholder="1 or 100" className="w-full bg-slate-800 border border-slate-600 rounded p-1.5 text-sm text-white focus:border-cyan-500 outline-none" step="any" required />
                             </div>
                         </div>
                         
